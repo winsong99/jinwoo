@@ -483,7 +483,17 @@ window.initApp = async function initApp() {
     initExportImport();
     resetReportForm();
   }
-  await loadState();
+  try {
+    await loadState();
+  } catch (err) {
+    $('.main').innerHTML = `
+      <div class="card" style="max-width:520px;margin-top:40px;">
+        <div class="card-head"><h2>데이터를 불러오지 못했습니다</h2></div>
+        <p class="muted">Supabase 연결 또는 테이블 설정을 확인해주세요.</p>
+        <p class="muted" style="word-break:break-all;">${escapeHtml(err.message || String(err))}</p>
+      </div>`;
+    return;
+  }
   populateStudentSelects();
   const activeTab = $('.nav-item.is-active')?.dataset.tab || 'dashboard';
   switchTab(activeTab);
