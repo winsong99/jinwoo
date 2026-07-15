@@ -82,6 +82,31 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+
+/* Auth gate */
+.auth-gate {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--page-plane);
+}
+.auth-gate[hidden] { display: none; }
+.auth-card {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+  padding: 40px 36px; width: 100%; max-width: 340px; text-align: center;
+}
+.auth-card .brand-mark { display: inline-flex; margin-bottom: 14px; }
+.auth-card h1 { font-size: 18px; margin: 0 0 6px; }
+.auth-card p.muted { margin: 0 0 22px; font-size: 13.5px; }
+.auth-card .btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; background: var(--surface-2); color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.auth-card .btn-primary:hover { background: var(--page-plane); opacity: 1; }
+.auth-error { color: var(--status-critical); font-size: 12.5px; margin: 14px 0 0; min-height: 1em; }
+
+.user-badge { display: flex; align-items: center; gap: 8px; padding: 0 6px 4px; }
+.user-badge img { width: 24px; height: 24px; border-radius: 50%; }
+.user-badge span { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
   background: var(--page-plane);
@@ -94,6 +119,7 @@ body {
   grid-template-columns: 232px 1fr;
   min-height: 100vh;
 }
+.app[hidden] { display: none; }
 
 /* Sidebar */
 .sidebar {

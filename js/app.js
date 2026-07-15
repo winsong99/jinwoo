@@ -30,7 +30,7 @@ function attendanceBadgeClass(v) {
   return { 출석: 'badge-present', 지각: 'badge-late', 조퇴: 'badge-early', 결석: 'badge-absent' }[v] || '';
 }
 function studentName(id) {
-  const s = DB.getStudents().find(s => s.id === id);
+  const s = STATE.students.find(s => s.id === id);
   return s ? s.name : '(삭제된 학생)';
 }
 function toast(msg) {
@@ -39,6 +39,15 @@ function toast(msg) {
   el.classList.add('is-visible');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.remove('is-visible'), 1800);
+}
+
+// ---------- In-memory cache (synced with Supabase) ----------
+const STATE = { students: [], reports: [] };
+
+async function loadState() {
+  const [students, reports] = await Promise.all([DB.getStudents(), DB.getReports()]);
+  STATE.students = students;
+  STATE.reports = reports;
 }
 
 // ---------- Tabs ----------
@@ -67,7 +76,7 @@ function initTabs() {
 
 // ---------- Shared selects ----------
 function populateStudentSelects() {
-  const students = DB.getStudents().slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const students = STATE.students.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   const fSel = $('#f-student');
   const filterSel = $('#filter-student');
   const keepF = fSel.value, keepFilter = filterSel.value;
@@ -85,8 +94,8 @@ function populateStudentSelects() {
 
 // ---------- Dashboard ----------
 function renderDashboard() {
-  const students = DB.getStudents();
-  const reports = DB.getReports();
+  const students = STATE.students;
+  const reports = STATE.reports;
   const today = todayISO();
 
   const todayReports = reports.filter(r => r.date === today);
@@ -250,7 +259,7 @@ function fillReportForm(report) {
 }
 
 function initReportForm() {
-  $('#report-form').addEventListener('submit', e => {
+  $('#report-form').addEventListener('submit', async e => {
     e.preventDefault();
     if (!$('#f-student').value) {
       toast('학생을 먼저 등록/선택해주세요');
@@ -267,10 +276,15 @@ function initReportForm() {
       progress: $('#f-progress').value.trim(),
       comment: $('#f-comment').value.trim(),
     };
-    DB.saveReport(report);
-    toast('리포트를 저장했습니다');
-    resetReportForm();
-    renderDashboard();
+    try {
+      await DB.saveReport(report);
+      await loadState();
+      toast('리포트를 저장했습니다');
+      resetReportForm();
+      renderDashboard();
+    } catch (err) {
+      toast('저장에 실패했습니다: ' + err.message);
+    }
   });
   $('#report-form-reset').addEventListener('click', resetReportForm);
 }
@@ -282,7 +296,7 @@ function renderReportList() {
   const from = $('#filter-from').value;
   const to = $('#filter-to').value;
 
-  let rows = DB.getReports();
+  let rows = STATE.reports;
   if (studentId) rows = rows.filter(r => r.studentId === studentId);
   if (from) rows = rows.filter(r => r.date >= from);
   if (to) rows = rows.filter(r => r.date <= to);
@@ -308,16 +322,21 @@ function renderReportList() {
   `).join('');
 
   $$('[data-edit]', tbody).forEach(btn => btn.addEventListener('click', () => {
-    const r = DB.getReports().find(x => x.id === btn.dataset.edit);
+    const r = STATE.reports.find(x => x.id === btn.dataset.edit);
     if (!r) return;
     fillReportForm(r);
     switchTab('report-form');
   }));
-  $$('[data-del]', tbody).forEach(btn => btn.addEventListener('click', () => {
+  $$('[data-del]', tbody).forEach(btn => btn.addEventListener('click', async () => {
     if (!confirm('이 리포트를 삭제할까요?')) return;
-    DB.deleteReport(btn.dataset.del);
-    toast('리포트를 삭제했습니다');
-    renderReportList();
+    try {
+      await DB.deleteReport(btn.dataset.del);
+      await loadState();
+      toast('리포트를 삭제했습니다');
+      renderReportList();
+    } catch (err) {
+      toast('삭제에 실패했습니다: ' + err.message);
+    }
   }));
 }
 
@@ -341,7 +360,7 @@ function resetStudentForm() {
 }
 
 function renderStudents() {
-  const students = DB.getStudents().slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const students = STATE.students.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   $('#student-count').textContent = `${students.length}명`;
   const tbody = $('#student-table tbody');
   $('#student-empty').hidden = students.length > 0;
@@ -359,7 +378,7 @@ function renderStudents() {
   `).join('');
 
   $$('[data-edit]', tbody).forEach(btn => btn.addEventListener('click', () => {
-    const s = DB.getStudents().find(x => x.id === btn.dataset.edit);
+    const s = STATE.students.find(x => x.id === btn.dataset.edit);
     if (!s) return;
     $('#s-id').value = s.id;
     $('#s-name').value = s.name;
@@ -369,19 +388,24 @@ function renderStudents() {
     $('#s-memo').value = s.memo || '';
     $('#student-form-title').textContent = '학생 정보 수정';
   }));
-  $$('[data-del]', tbody).forEach(btn => btn.addEventListener('click', () => {
+  $$('[data-del]', tbody).forEach(btn => btn.addEventListener('click', async () => {
     if (!confirm('이 학생과 관련된 모든 리포트가 함께 삭제됩니다. 계속할까요?')) return;
-    DB.deleteStudent(btn.dataset.del);
-    toast('학생을 삭제했습니다');
-    renderStudents();
-    populateStudentSelects();
+    try {
+      await DB.deleteStudent(btn.dataset.del);
+      await loadState();
+      toast('학생을 삭제했습니다');
+      renderStudents();
+      populateStudentSelects();
+    } catch (err) {
+      toast('삭제에 실패했습니다: ' + err.message);
+    }
   }));
 
   populateStudentSelects();
 }
 
 function initStudentForm() {
-  $('#student-form').addEventListener('submit', e => {
+  $('#student-form').addEventListener('submit', async e => {
     e.preventDefault();
     const student = {
       id: $('#s-id').value || null,
@@ -392,10 +416,15 @@ function initStudentForm() {
       memo: $('#s-memo').value.trim(),
     };
     if (!student.name) { toast('이름을 입력해주세요'); return; }
-    DB.saveStudent(student);
-    toast('학생 정보를 저장했습니다');
-    resetStudentForm();
-    renderStudents();
+    try {
+      await DB.saveStudent(student);
+      await loadState();
+      toast('학생 정보를 저장했습니다');
+      resetStudentForm();
+      renderStudents();
+    } catch (err) {
+      toast('저장에 실패했습니다: ' + err.message);
+    }
   });
   $('#student-form-reset').addEventListener('click', resetStudentForm);
 }
@@ -403,7 +432,7 @@ function initStudentForm() {
 // ---------- Export / Import ----------
 function initExportImport() {
   $('#export-btn').addEventListener('click', () => {
-    const blob = new Blob([DB.exportAll()], { type: 'application/json' });
+    const blob = new Blob([DB.exportAll(STATE.students, STATE.reports)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -416,15 +445,16 @@ function initExportImport() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
-        DB.importAll(reader.result);
+        await DB.importAll(reader.result);
+        await loadState();
         toast('데이터를 가져왔습니다');
         renderDashboard();
         renderStudents();
         renderReportList();
       } catch (err) {
-        toast('가져오기에 실패했습니다: 파일 형식을 확인해주세요');
+        toast('가져오기에 실패했습니다: ' + err.message);
       }
     };
     reader.readAsText(file);
@@ -439,16 +469,22 @@ function initTodayLabel() {
   $('#today-label').textContent = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${wd})`;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initTabs();
-  initTodayLabel();
-  initStarInput();
-  initReportForm();
-  initReportListFilters();
-  initStudentForm();
-  initExportImport();
+let appInitialized = false;
 
-  resetReportForm();
+window.initApp = async function initApp() {
+  if (!appInitialized) {
+    appInitialized = true;
+    initTabs();
+    initTodayLabel();
+    initStarInput();
+    initReportForm();
+    initReportListFilters();
+    initStudentForm();
+    initExportImport();
+    resetReportForm();
+  }
+  await loadState();
   populateStudentSelects();
-  renderDashboard();
-});
+  const activeTab = $('.nav-item.is-active')?.dataset.tab || 'dashboard';
+  switchTab(activeTab);
+};

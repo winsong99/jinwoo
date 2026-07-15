@@ -1,81 +1,123 @@
-// localStorage 기반 데이터 저장소
-const DB = {
-  STUDENTS_KEY: 'ea_students',
-  REPORTS_KEY: 'ea_reports',
+// Supabase 기반 데이터 저장소
+// 로그인한 모든 사용자가 같은 students / reports 테이블을 공유합니다.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  _read(key) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      console.error('데이터 읽기 실패:', key, e);
-      return [];
-    }
-  },
-  _write(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
-  },
-  uid() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  },
+function fromStudentRow(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    class: r.class || '',
+    phone: r.phone || '',
+    parentPhone: r.parent_phone || '',
+    memo: r.memo || '',
+  };
+}
+function toStudentPayload(s) {
+  return {
+    name: s.name,
+    class: s.class || null,
+    phone: s.phone || null,
+    parent_phone: s.parentPhone || null,
+    memo: s.memo || null,
+  };
+}
+function fromReportRow(r) {
+  return {
+    id: r.id,
+    studentId: r.student_id,
+    date: r.date,
+    attendance: r.attendance,
+    homework: r.homework || '',
+    attitude: r.attitude || '',
+    understanding: r.understanding || 0,
+    progress: r.progress || '',
+    comment: r.comment || '',
+    createdAt: r.created_at,
+  };
+}
+function toReportPayload(r) {
+  return {
+    student_id: r.studentId,
+    date: r.date,
+    attendance: r.attendance,
+    homework: r.homework || null,
+    attitude: r.attitude || null,
+    understanding: r.understanding || null,
+    progress: r.progress || null,
+    comment: r.comment || null,
+  };
+}
+
+const DB = {
+  auth: sb.auth,
 
   // Students
-  getStudents() {
-    return this._read(this.STUDENTS_KEY);
+  async getStudents() {
+    const { data, error } = await sb.from('students').select('*');
+    if (error) throw error;
+    return data.map(fromStudentRow);
   },
-  saveStudent(student) {
-    const list = this.getStudents();
+  async saveStudent(student) {
+    const payload = toStudentPayload(student);
     if (student.id) {
-      const idx = list.findIndex(s => s.id === student.id);
-      if (idx >= 0) list[idx] = student;
-      else list.push(student);
-    } else {
-      student.id = this.uid();
-      list.push(student);
+      const { data, error } = await sb.from('students').update(payload).eq('id', student.id).select().single();
+      if (error) throw error;
+      return fromStudentRow(data);
     }
-    this._write(this.STUDENTS_KEY, list);
-    return student;
+    const { data, error } = await sb.from('students').insert(payload).select().single();
+    if (error) throw error;
+    return fromStudentRow(data);
   },
-  deleteStudent(id) {
-    const list = this.getStudents().filter(s => s.id !== id);
-    this._write(this.STUDENTS_KEY, list);
-    const reports = this.getReports().filter(r => r.studentId !== id);
-    this._write(this.REPORTS_KEY, reports);
+  async deleteStudent(id) {
+    const { error } = await sb.from('students').delete().eq('id', id);
+    if (error) throw error;
   },
 
   // Reports
-  getReports() {
-    return this._read(this.REPORTS_KEY);
+  async getReports() {
+    const { data, error } = await sb.from('reports').select('*');
+    if (error) throw error;
+    return data.map(fromReportRow);
   },
-  saveReport(report) {
-    const list = this.getReports();
+  async saveReport(report) {
+    const payload = toReportPayload(report);
     if (report.id) {
-      const idx = list.findIndex(r => r.id === report.id);
-      if (idx >= 0) list[idx] = report;
-      else list.push(report);
-    } else {
-      report.id = this.uid();
-      report.createdAt = new Date().toISOString();
-      list.push(report);
+      const { data, error } = await sb.from('reports').update(payload).eq('id', report.id).select().single();
+      if (error) throw error;
+      return fromReportRow(data);
     }
-    this._write(this.REPORTS_KEY, list);
-    return report;
+    const { data, error } = await sb.from('reports').insert(payload).select().single();
+    if (error) throw error;
+    return fromReportRow(data);
   },
-  deleteReport(id) {
-    const list = this.getReports().filter(r => r.id !== id);
-    this._write(this.REPORTS_KEY, list);
+  async deleteReport(id) {
+    const { error } = await sb.from('reports').delete().eq('id', id);
+    if (error) throw error;
   },
 
-  exportAll() {
-    return JSON.stringify({
-      students: this.getStudents(),
-      reports: this.getReports(),
-      exportedAt: new Date().toISOString(),
-    }, null, 2);
+  exportAll(students, reports) {
+    return JSON.stringify({ students, reports, exportedAt: new Date().toISOString() }, null, 2);
   },
-  importAll(json) {
+  async importAll(json) {
     const data = JSON.parse(json);
-    if (Array.isArray(data.students)) this._write(this.STUDENTS_KEY, data.students);
-    if (Array.isArray(data.reports)) this._write(this.REPORTS_KEY, data.reports);
+    const idMap = {};
+    for (const s of data.students || []) {
+      const created = await this.saveStudent({ name: s.name, class: s.class, phone: s.phone, parentPhone: s.parentPhone, memo: s.memo });
+      idMap[s.id] = created.id;
+    }
+    for (const r of data.reports || []) {
+      const studentId = idMap[r.studentId];
+      if (!studentId) continue;
+      await this.saveReport({
+        studentId,
+        date: r.date,
+        attendance: r.attendance,
+        homework: r.homework,
+        attitude: r.attitude,
+        understanding: r.understanding,
+        progress: r.progress,
+        comment: r.comment,
+      });
+    }
   },
 };
